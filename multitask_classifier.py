@@ -31,7 +31,8 @@ def seed_everything(seed=11711):
 
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
-
+##### Added Warmup period #####
+WARMUP_PERCENTAGE = 0.2
 
 class MultitaskBERT(nn.Module):
     '''
@@ -118,6 +119,8 @@ class MultitaskBERT(nn.Module):
         pooler_output_1 = self.forward(input_ids_1, attention_mask_1)
         pooler_output_2 = self.forward(input_ids_2, attention_mask_2)
 
+        # TODO: Add the difference of two outputs and concat them together along with two pooler outputs
+
         ############# New approach: perform cosine similarity instead of dense layer ############
         cos = nn.CosineSimilarity()
         similarity_logits = cos(pooler_output_1, pooler_output_2)
@@ -187,6 +190,17 @@ def train_multitask(args):
 
     lr = args.lr
     optimizer = AdamW(model.parameters(), lr=lr)
+
+    ######## Add warmup to learning rate scheduler, and apply linear decay after warmup ######
+    warmup_steps = int(args.epochs * WARMUP_PERCENTAGE)
+    def warmup(current_step):
+        if current_step < warmup_steps:
+            return float(current_step / warmup_steps)
+        else:
+            return max(0.0, float(args.epochs - current_step) / float(max(1, args.epochs - warmup_steps)))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup)
+    ##########################################################################################
+
     best_dev_acc = 0
 
     # Run for the specified number of epochs
@@ -264,6 +278,9 @@ def train_multitask(args):
         
         #################################################################################
             
+        # Change learning rate
+        scheduler.step()
+
         # Modify criterion #
         train_loss = train_loss / (num_batches)
         print(f"Epoch {epoch}: train loss :: {train_loss :.3f}")
