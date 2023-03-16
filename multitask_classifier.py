@@ -36,7 +36,6 @@ N_SENTIMENT_CLASSES = 5
 class MultitaskBERT(nn.Module):
     '''
     This module should use BERT for 3 tasks:
-
     - Sentiment classification (predict_sentiment)
     - Paraphrase detection (predict_paraphrase)
     - Semantic Textual Similarity (predict_similarity)
@@ -60,7 +59,7 @@ class MultitaskBERT(nn.Module):
         self.paraphrase_layer = nn.Linear(config.hidden_size * 2, 1)
 
         # semantic similarity
-        self.similarity_layer = nn.Linear(config.hidden_size * 2, 1)
+        # self.similarity_layer = nn.Linear(config.hidden_size * 2, 1)
 
     def forward(self, input_ids, attention_mask):
         'Takes a batch of sentences and produces embeddings for them.'
@@ -119,11 +118,9 @@ class MultitaskBERT(nn.Module):
         pooler_output_1 = self.forward(input_ids_1, attention_mask_1)
         pooler_output_2 = self.forward(input_ids_2, attention_mask_2)
 
-        # Concatenate the hidden states of the two sentences
-        concat_output = torch.cat((pooler_output_1, pooler_output_2), dim=1)
-
-        # Get similarity logits
-        similarity_logits = self.similarity_layer(concat_output)
+        ############# New approach: perform cosine similarity instead of dense layer ############
+        cos = nn.CosineSimilarity()
+        similarity_logits = cos(pooler_output_1, pooler_output_2)
 
         # Return similarity logits
         return similarity_logits
@@ -165,14 +162,16 @@ def train_multitask(args):
                                       collate_fn=sst_train_data.collate_fn)
     sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=False, batch_size=args.batch_size,
                                     collate_fn=sst_dev_data.collate_fn)
+    ##### Added #####
     para_train_dataloader = DataLoader(para_train_data, shuffle=True, batch_size=args.batch_size,
-                                      collate_fn=para_train_data.collate_fn)  ## Added
+                                      collate_fn=para_train_data.collate_fn) 
     para_dev_dataloader = DataLoader(para_dev_data, shuffle=False, batch_size=args.batch_size,
-                                    collate_fn=para_dev_data.collate_fn)  ## Added
+                                    collate_fn=para_dev_data.collate_fn)
     sts_train_dataloader = DataLoader(sts_train_data, shuffle=True, batch_size=args.batch_size,
-                                      collate_fn=sts_train_data.collate_fn)  ## Added
+                                      collate_fn=sts_train_data.collate_fn) 
     sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=False, batch_size=args.batch_size,
-                                    collate_fn=sts_dev_data.collate_fn)  ## Added
+                                    collate_fn=sts_dev_data.collate_fn)
+    ##################
 
     # Init model
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
@@ -192,6 +191,7 @@ def train_multitask(args):
 
     # Run for the specified number of epochs
     for epoch in range(args.epochs):
+        print("-------------------- Training Epoch {} --------------------".format(epoch))
         model.train()
         train_loss = 0
         num_batches = 0
@@ -209,12 +209,11 @@ def train_multitask(args):
 
             loss.backward()
             optimizer.step()
-            print(f"Epoch {epoch}: training loss for sentiment classification: {loss :.3f}")  # Added
 
             train_loss += loss.item()
             num_batches += 1
 
-        ########## MODIFIED loss function to take into account the other two tasks ##########
+        # ########## MODIFIED loss function to take into account the other two tasks ##########
         # Paraphrase
         for batch in tqdm(para_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
             (b_ids1, b_mask1,
@@ -231,13 +230,9 @@ def train_multitask(args):
 
             optimizer.zero_grad()
             logits2 = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
-            # y_hat2 = logits2.sigmoid().round().flatten().cpu().numpy()
-            # b_labels2 = b_labels2.flatten().cpu().numpy()
-            # loss2 = F.mse_loss()(y_hat2, b_labels2)
             loss2 = F.binary_cross_entropy_with_logits(logits2, b_labels2.float().unsqueeze(1), reduction='sum') / args.batch_size
 
             loss2.backward()
-            print(f"Epoch {epoch}: training loss for paraphrase detection: {loss2 :.3f}")
             optimizer.step()
             num_batches += 1
             train_loss += loss2.item()
@@ -257,15 +252,12 @@ def train_multitask(args):
             b_labels3 = b_labels3.to(device)
 
             optimizer.zero_grad()
-            logits3 = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2).sigmoid()
-            # y_hat3 = logits3.flatten().detach().cpu().numpy()
-            # b_labels3 = b_labels3.flatten().detach().cpu().numpy()
+            logits3 = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2)
 
             mse = F.mse_loss
-            # loss3 = mse(y_hat3, b_labels3/5)
-            loss3 = mse(logits3.flatten(), b_labels3.float()/5) / args.batch_size
+            # Normalize [0, 5] to [-1, 1] to align with cosine similarity
+            loss3 = mse(logits3.flatten(), (b_labels3.float()/2.5-1)) / args.batch_size
             loss3.backward()
-            print(f"Epoch {epoch}: training loss for sentence similarity:: {loss3 :.3f}")
             optimizer.step()
             num_batches += 1
             train_loss += loss3.item()
@@ -274,17 +266,8 @@ def train_multitask(args):
             
         # Modify criterion #
         train_loss = train_loss / (num_batches)
-
-        # train_acc, train_f1, *_ = model_eval_sst(sst_train_dataloader, model, device)
-        # dev_acc, dev_f1, *_ = model_eval_sst(sst_dev_dataloader, model, device)
-
-        # if dev_acc > best_dev_acc:
-        #     best_dev_acc = dev_acc
-        #     save_model(model, optimizer, args, config, args.filepath)
-
-        # print(f"Epoch {epoch}: train loss :: {train_loss :.3f}, train acc :: {train_acc :.3f}, dev acc :: {dev_acc :.3f}")
-        
         print(f"Epoch {epoch}: train loss :: {train_loss :.3f}")
+
         print("EPOCH {}, training accuracy:".format(epoch))
         _ = model_eval_multitask(sst_train_dataloader, para_train_dataloader, sts_train_dataloader, model, device)
         print("EPOCH {}, validation accuracy:".format(epoch))
