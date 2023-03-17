@@ -21,3 +21,7 @@ Accuracy for using cosine simiarity during training: 0.503, 0.722, 0.412, (0.546
 drop to zero during the later 80% steps.
 
 Accuracy: 0.520, 0.767, 0.419, (0.569)
+
+5. Added abs(diff(pool1, pool2)) along with the two original pooling outcomes to train similarity task.
+
+Accuracy: 0.520, 0.795, 0.529, (0.615)
