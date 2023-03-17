@@ -60,6 +60,8 @@ class MultitaskBERT(nn.Module):
         self.paraphrase_layer = nn.Linear(config.hidden_size * 2, 1)
 
         # semantic similarity
+        self.similarity_layer = nn.Linear(config.hidden_size * 3, 1)
+        # self.similarity_layer2 = nn.Linear(2, 1)
         # self.similarity_layer = nn.Linear(config.hidden_size * 2, 1)
 
     def forward(self, input_ids, attention_mask):
@@ -120,10 +122,22 @@ class MultitaskBERT(nn.Module):
         pooler_output_2 = self.forward(input_ids_2, attention_mask_2)
 
         # TODO: Add the difference of two outputs and concat them together along with two pooler outputs
+        pooler_diff = torch.abs(torch.sub(pooler_output_1, pooler_output_2))
+        # pooler_diff_norm = torch.linalg.vector_norm(pooler_diff)
+        concat_out = torch.cat((pooler_output_1, pooler_output_2, pooler_diff), dim=1)
+        # concat_out = torch.cat((pooler_output_1, pooler_output_2), dim=1)
+
+        # TODO: check dimension to get only one number output -- passed
 
         ############# New approach: perform cosine similarity instead of dense layer ############
-        cos = nn.CosineSimilarity()
-        similarity_logits = cos(pooler_output_1, pooler_output_2)
+        #### Result is worse when also put this parallel to result induced from concat_out ###
+        # cos = nn.CosineSimilarity()
+        # sim_score = cos(pooler_output_1, pooler_output_2)
+        # NEW: put this number also in the concat output
+
+        # Get paraphrase logits
+        similarity_logits = self.similarity_layer(concat_out)
+        # similarity_logits2 = self.similarity_layer2(torch.cat((similarity_logits, sim_score.unsqueeze(1)), dim=1))
 
         # Return similarity logits
         return similarity_logits
@@ -195,7 +209,7 @@ def train_multitask(args):
     warmup_steps = int(args.epochs * WARMUP_PERCENTAGE)
     def warmup(current_step):
         if current_step < warmup_steps:
-            return float(current_step / warmup_steps)
+            return float(2**current_step / 2**warmup_steps)
         else:
             return max(0.0, float(args.epochs - current_step) / float(max(1, args.epochs - warmup_steps)))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup)
@@ -231,10 +245,10 @@ def train_multitask(args):
         # Paraphrase
         for batch in tqdm(para_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
             (b_ids1, b_mask1,
-             b_ids2, b_mask2,
-             b_labels2, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
-                          batch['token_ids_2'], batch['attention_mask_2'],
-                          batch['labels'], batch['sent_ids'])
+            b_ids2, b_mask2,
+            b_labels2, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
+                        batch['token_ids_2'], batch['attention_mask_2'],
+                        batch['labels'], batch['sent_ids'])
 
             b_ids1 = b_ids1.to(device)
             b_mask1 = b_mask1.to(device)
@@ -250,14 +264,17 @@ def train_multitask(args):
             optimizer.step()
             num_batches += 1
             train_loss += loss2.item()
+
+        # sts_y_true_train = []
+        # sts_y_pred_train = []
         
         # Similarity
         for batch in tqdm(sts_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
             (b_ids1, b_mask1,
-             b_ids2, b_mask2,
-             b_labels3, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
-                          batch['token_ids_2'], batch['attention_mask_2'],
-                          batch['labels'], batch['sent_ids'])
+            b_ids2, b_mask2,
+            b_labels3, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
+                        batch['token_ids_2'], batch['attention_mask_2'],
+                        batch['labels'], batch['sent_ids'])
 
             b_ids1 = b_ids1.to(device)
             b_mask1 = b_mask1.to(device)
@@ -268,6 +285,9 @@ def train_multitask(args):
             optimizer.zero_grad()
             logits3 = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2)
 
+            # sts_y_pred_train.extend(logits3.detach().flatten().cpu().numpy())
+            # sts_y_true_train.extend(b_labels3.detach().flatten().cpu().numpy())
+
             mse = F.mse_loss
             # Normalize [0, 5] to [-1, 1] to align with cosine similarity
             loss3 = mse(logits3.flatten(), (b_labels3.float()/2.5-1)) / args.batch_size
@@ -276,12 +296,12 @@ def train_multitask(args):
             num_batches += 1
             train_loss += loss3.item()
         
-        #################################################################################
+        ################################################################################
             
         # Change learning rate
         scheduler.step()
 
-        # Modify criterion #
+        # # Modify criterion #
         train_loss = train_loss / (num_batches)
         print(f"Epoch {epoch}: train loss :: {train_loss :.3f}")
 
@@ -295,8 +315,36 @@ def train_multitask(args):
             best_dev_acc = dev_acc
             save_model(model, optimizer, args, config, args.filepath)
 
+        # pearson_mat_train = np.corrcoef(sts_y_pred_train,sts_y_true_train)
+        # sts_corr_train = pearson_mat_train[1][0]
+        # print("Similarity accuracy training:", sts_corr_train)
 
 
+        # #### Evaluate semantic textual similarity ON DEV SET ###
+        # sts_y_true_dev = []
+        # sts_y_pred_dev = []
+        # for step, batch in enumerate(tqdm(sts_dev_dataloader, desc=f'eval', disable=TQDM_DISABLE)):
+        #     (b_ids1, b_mask1,
+        #      b_ids2, b_mask2,
+        #      b_labels, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
+        #                   batch['token_ids_2'], batch['attention_mask_2'],
+        #                   batch['labels'], batch['sent_ids'])
+
+        #     b_ids1 = b_ids1.to(device)
+        #     b_mask1 = b_mask1.to(device)
+        #     b_ids2 = b_ids2.to(device)
+        #     b_mask2 = b_mask2.to(device)
+
+        #     logits = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2)
+        #     y_hat = logits.detach().flatten().cpu().numpy()
+        #     b_labels = b_labels.detach().flatten().cpu().numpy()
+
+        #     sts_y_true_dev.extend(y_hat)
+        #     sts_y_pred_dev.extend(b_labels)
+
+        # pearson_mat_dev = np.corrcoef(sts_y_pred_dev,sts_y_true_dev)
+        # sts_corr_dev = pearson_mat_dev[1][0]
+        # print("Similarity accuracy dev:", sts_corr_dev)
 
 def test_model(args):
     with torch.no_grad():
