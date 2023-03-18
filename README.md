@@ -25,3 +25,8 @@ Accuracy: 0.520, 0.767, 0.419, (0.569)
 5. Added abs(diff(pool1, pool2)) along with the two original pooling outcomes to train similarity task.
 
 Accuracy: 0.520, 0.795, 0.529, (0.615)
+
+Update 03/17: tried concat -> dropout -> dnese to 64 -> dropout -> dense to 1 architecture, achieved 0.75
+dev accuracy when training **only** the similarity task using dropout rate = 0.3 and epochs = 12. Can try 
+15 epochs (Suspecting training for few more epochs may make it better?) 0.5 dropout rate has only 0.71 acc.
+0.4 dropout = 0.74 acc. We'll keep dropout = 0.3 for later.
