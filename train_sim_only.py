@@ -60,8 +60,9 @@ class MultitaskBERT(nn.Module):
         self.paraphrase_layer = nn.Linear(config.hidden_size * 2, 1)
 
         # semantic similarity
-        self.similarity_layer = nn.Linear(config.hidden_size * 3, 1)
-        # self.similarity_layer2 = nn.Linear(2, 1)
+        # Add one more layer before output
+        # Layer size 64 arbitrary
+        self.similarity_layer = nn.Linear(config.hidden_size, 1)
         # self.similarity_layer = nn.Linear(config.hidden_size * 2, 1)
 
     def forward(self, input_ids, attention_mask):
@@ -124,20 +125,22 @@ class MultitaskBERT(nn.Module):
         # TODO: Add the difference of two outputs and concat them together along with two pooler outputs
         pooler_diff = torch.abs(torch.sub(pooler_output_1, pooler_output_2))
         # pooler_diff_norm = torch.linalg.vector_norm(pooler_diff)
-        concat_out = torch.cat((pooler_output_1, pooler_output_2, pooler_diff), dim=1)
-        # concat_out = torch.cat((pooler_output_1, pooler_output_2), dim=1)
 
         # TODO: check dimension to get only one number output -- passed
 
         ############# New approach: perform cosine similarity instead of dense layer ############
-        #### Result is worse when also put this parallel to result induced from concat_out ###
-        # cos = nn.CosineSimilarity()
-        # sim_score = cos(pooler_output_1, pooler_output_2)
+        cos = nn.CosineSimilarity()
+        sim_score = cos(pooler_output_1, pooler_output_2)
         # NEW: put this number also in the concat output
+        concat_out = torch.cat((pooler_output_1, pooler_output_2, pooler_diff), dim=1)
+        # concat_out = torch.cat((pooler_output_1, pooler_output_2), dim=1)
 
         # Get paraphrase logits
-        similarity_logits = self.similarity_layer(concat_out)
+        # similarity_logits = self.dropout(concat_out)
+        similarity_logits = self.similarity_layer(pooler_diff)
+        similarity_logits = self.dropout(similarity_logits)
         # similarity_logits2 = self.similarity_layer2(torch.cat((similarity_logits, sim_score.unsqueeze(1)), dim=1))
+        # similarity_logits2 = self.similarity_layer2(similarity_logits)
 
         # Return similarity logits
         return similarity_logits
@@ -223,23 +226,23 @@ def train_multitask(args):
         model.train()
         train_loss = 0
         num_batches = 0
-        for batch in tqdm(sst_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
-            b_ids, b_mask, b_labels = (batch['token_ids'],
-                                       batch['attention_mask'], batch['labels'])
+        # for batch in tqdm(sst_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
+        #     b_ids, b_mask, b_labels = (batch['token_ids'],
+        #                                batch['attention_mask'], batch['labels'])
 
-            b_ids = b_ids.to(device)
-            b_mask = b_mask.to(device)
-            b_labels = b_labels.to(device)
+        #     b_ids = b_ids.to(device)
+        #     b_mask = b_mask.to(device)
+        #     b_labels = b_labels.to(device)
 
-            optimizer.zero_grad()
-            logits = model.predict_sentiment(b_ids, b_mask)
-            loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+        #     optimizer.zero_grad()
+        #     logits = model.predict_sentiment(b_ids, b_mask)
+        #     loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
 
-            loss.backward()
-            optimizer.step()
+        #     loss.backward()
+        #     optimizer.step()
 
-            train_loss += loss.item()
-            num_batches += 1
+        #     train_loss += loss.item()
+        #     num_batches += 1
 
         # # ########## MODIFIED loss function to take into account the other two tasks ##########
         # # Paraphrase
