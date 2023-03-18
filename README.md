@@ -29,4 +29,7 @@ Accuracy: 0.520, 0.795, 0.529, (0.615)
 Update 03/17: tried concat -> dropout -> dnese to 64 -> dropout -> dense to 1 architecture, achieved 0.75
 dev accuracy when training **only** the similarity task using dropout rate = 0.3 and epochs = 12. Can try 
 15 epochs (Suspecting training for few more epochs may make it better?) 0.5 dropout rate has only 0.71 acc.
-0.4 dropout = 0.74 acc. We'll keep dropout = 0.3 for later.
+0.4 dropout = 0.74 acc. We'll keep dropout = 0.3 for later. Update 03/18: this method fails when training 
+three tasks simutaneously. Accuracy are 0.497, 0.787, 0.531. No improvement on similarity, but worse on
+sentiment classification. Also, the additional dataset approach also failed. Decreased performance in both
+sentiment classification and similarity tasks compared to the best one. 
