@@ -11,7 +11,7 @@ from optimizer import AdamW
 from tqdm import tqdm
 
 from datasets import SentenceClassificationDataset, SentencePairDataset, \
-    load_multitask_data, load_multitask_test_data, load_multitask_data_additional
+    load_multitask_data, load_multitask_test_data, load_multitask_data_merged
 
 from evaluation import model_eval_sst, test_model_multitask, model_eval_multitask
 
@@ -60,7 +60,8 @@ class MultitaskBERT(nn.Module):
         self.paraphrase_layer = nn.Linear(config.hidden_size * 2, 1)
 
         # semantic similarity
-        self.similarity_layer = nn.Linear(config.hidden_size * 3, 1)
+        self.similarity_layer = nn.Linear(config.hidden_size * 3, 64)
+        self.similarity_layer2 = nn.Linear(64, 1)
         # self.similarity_layer2 = nn.Linear(2, 1)
         # self.similarity_layer = nn.Linear(config.hidden_size * 2, 1)
 
@@ -103,7 +104,7 @@ class MultitaskBERT(nn.Module):
         concat_output = torch.cat((pooler_output_1, pooler_output_2), dim=1)
 
         # Get paraphrase logits
-        paraphrase_logits = self.paraphrase_layer(concat_output)
+        paraphrase_logits = self.paraphrase_layer(self.dropout(concat_output))
 
         # Return paraphrase logits
         return paraphrase_logits
@@ -136,11 +137,15 @@ class MultitaskBERT(nn.Module):
         # NEW: put this number also in the concat output
 
         # Get paraphrase logits
-        similarity_logits = self.similarity_layer(concat_out)
+        similarity_logits = self.dropout(concat_out)
+        similarity_logits = self.similarity_layer(similarity_logits)
+        similarity_logits = self.dropout(similarity_logits)
+        # similarity_logits2 = self.similarity_layer2(torch.cat((similarity_logits, sim_score.unsqueeze(1)), dim=1))
+        similarity_logits2 = self.similarity_layer2(similarity_logits)
         # similarity_logits2 = self.similarity_layer2(torch.cat((similarity_logits, sim_score.unsqueeze(1)), dim=1))
 
         # Return similarity logits
-        return similarity_logits
+        return similarity_logits2
 
 def save_model(model, optimizer, args, config, filepath):
     save_info = {
@@ -162,17 +167,16 @@ def train_multitask(args):
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
     # Load data
     # Create the data and its corresponding datasets and dataloader
-    sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train')
+    sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data_merged(
+        args.sst_train, args.sent_additional, args.para_train, args.para_additional, args.sts_train, args.sim_additional, split ='train')
     sst_dev_data, num_labels,para_dev_data, sts_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train')
 
     sst_train_data = SentenceClassificationDataset(sst_train_data, args)
     sst_dev_data = SentenceClassificationDataset(sst_dev_data, args)
-    #### Added ####
     para_train_data = SentencePairDataset(para_train_data, args)
     para_dev_data = SentencePairDataset(para_dev_data, args) 
     sts_train_data = SentencePairDataset(sts_train_data, args)
     sts_dev_data = SentencePairDataset(sts_dev_data, args, isRegression=True)
-    ###############
 
 
     sst_train_dataloader = DataLoader(sst_train_data, shuffle=True, batch_size=args.batch_size,
@@ -190,19 +194,19 @@ def train_multitask(args):
                                     collate_fn=sts_dev_data.collate_fn)
     ##################
 
-    ################## Load additional datasets ####################
-    sent_additional_data, num_labels_additional, para_additional_data, sim_additional_data = load_multitask_data_additional(
-        args.sent_additional,args.para_additional,args.sim_additional, split ='train')
-    sent_additional_data = SentenceClassificationDataset(sent_additional_data, args)
-    para_additional_data = SentencePairDataset(para_additional_data, args)
-    sim_additional_data = SentencePairDataset(sim_additional_data, args)
-    sent_additional_dataloader = DataLoader(sent_additional_data, shuffle=True, batch_size=args.batch_size,
-                                      collate_fn=sent_additional_data.collate_fn)
-    para_additional_dataloader = DataLoader(para_additional_data, shuffle=True, batch_size=args.batch_size,
-                                      collate_fn=para_additional_data.collate_fn)
-    sim_additional_dataloader = DataLoader(sim_additional_data, shuffle=True, batch_size=args.batch_size,
-                                      collate_fn=sim_additional_data.collate_fn)
-    #################################################################
+    # ################## Load additional datasets ####################
+    # sent_additional_data, num_labels_additional, para_additional_data, sim_additional_data = load_multitask_data_additional(
+    #     args.sent_additional,args.para_additional,args.sim_additional, split ='train')
+    # sent_additional_data = SentenceClassificationDataset(sent_additional_data, args)
+    # para_additional_data = SentencePairDataset(para_additional_data, args)
+    # sim_additional_data = SentencePairDataset(sim_additional_data, args)
+    # sent_additional_dataloader = DataLoader(sent_additional_data, shuffle=True, batch_size=args.batch_size,
+    #                                   collate_fn=sent_additional_data.collate_fn)
+    # para_additional_dataloader = DataLoader(para_additional_data, shuffle=True, batch_size=args.batch_size,
+    #                                   collate_fn=para_additional_data.collate_fn)
+    # sim_additional_dataloader = DataLoader(sim_additional_data, shuffle=True, batch_size=args.batch_size,
+    #                                   collate_fn=sim_additional_data.collate_fn)
+    # #################################################################
 
 
     # Init model
@@ -258,25 +262,25 @@ def train_multitask(args):
             train_loss += loss.item()
             num_batches += 1
 
-        ################### Train on additional dataset #################
-        for batch in tqdm(sent_additional_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
-            b_ids, b_mask, b_labels = (batch['token_ids'],
-                                       batch['attention_mask'], batch['labels'])
+        # ################### Train on additional dataset #################
+        # for batch in tqdm(sent_additional_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
+        #     b_ids, b_mask, b_labels = (batch['token_ids'],
+        #                                batch['attention_mask'], batch['labels'])
 
-            b_ids = b_ids.to(device)
-            b_mask = b_mask.to(device)
-            b_labels = b_labels.to(device)
+        #     b_ids = b_ids.to(device)
+        #     b_mask = b_mask.to(device)
+        #     b_labels = b_labels.to(device)
 
-            optimizer.zero_grad()
-            logits = model.predict_sentiment(b_ids, b_mask)
-            loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+        #     optimizer.zero_grad()
+        #     logits = model.predict_sentiment(b_ids, b_mask)
+        #     loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
 
-            loss.backward()
-            optimizer.step()
+        #     loss.backward()
+        #     optimizer.step()
 
-            train_loss += loss.item()
-            num_batches += 1
-        ##################################################################
+        #     train_loss += loss.item()
+        #     num_batches += 1
+        # ##################################################################
 
         # Paraphrase
         for batch in tqdm(para_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
@@ -301,29 +305,29 @@ def train_multitask(args):
             num_batches += 1
             train_loss += loss2.item()
 
-        ################# Train on additional dataset ##################
-        for batch in tqdm(para_additional_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
-            (b_ids1, b_mask1,
-            b_ids2, b_mask2,
-            b_labels2, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
-                        batch['token_ids_2'], batch['attention_mask_2'],
-                        batch['labels'], batch['sent_ids'])
+        # ################# Train on additional dataset ##################
+        # for batch in tqdm(para_additional_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
+        #     (b_ids1, b_mask1,
+        #     b_ids2, b_mask2,
+        #     b_labels2, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
+        #                 batch['token_ids_2'], batch['attention_mask_2'],
+        #                 batch['labels'], batch['sent_ids'])
 
-            b_ids1 = b_ids1.to(device)
-            b_mask1 = b_mask1.to(device)
-            b_ids2 = b_ids2.to(device)
-            b_mask2 = b_mask2.to(device)
-            b_labels2 = b_labels2.to(device)
+        #     b_ids1 = b_ids1.to(device)
+        #     b_mask1 = b_mask1.to(device)
+        #     b_ids2 = b_ids2.to(device)
+        #     b_mask2 = b_mask2.to(device)
+        #     b_labels2 = b_labels2.to(device)
 
-            optimizer.zero_grad()
-            logits2 = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
-            loss2 = F.binary_cross_entropy_with_logits(logits2, b_labels2.float().unsqueeze(1), reduction='sum') / args.batch_size
+        #     optimizer.zero_grad()
+        #     logits2 = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
+        #     loss2 = F.binary_cross_entropy_with_logits(logits2, b_labels2.float().unsqueeze(1), reduction='sum') / args.batch_size
 
-            loss2.backward()
-            optimizer.step()
-            num_batches += 1
-            train_loss += loss2.item()
-        ##################################################################
+        #     loss2.backward()
+        #     optimizer.step()
+        #     num_batches += 1
+        #     train_loss += loss2.item()
+        # ##################################################################
         
         # Similarity
         for batch in tqdm(sts_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
@@ -350,31 +354,31 @@ def train_multitask(args):
             num_batches += 1
             train_loss += loss3.item()
 
-        ################## Train on additional dataset #######################
-        for batch in tqdm(sim_additional_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
-            (b_ids1, b_mask1,
-            b_ids2, b_mask2,
-            b_labels3, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
-                        batch['token_ids_2'], batch['attention_mask_2'],
-                        batch['labels'], batch['sent_ids'])
+        # ################## Train on additional dataset #######################
+        # for batch in tqdm(sim_additional_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
+        #     (b_ids1, b_mask1,
+        #     b_ids2, b_mask2,
+        #     b_labels3, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
+        #                 batch['token_ids_2'], batch['attention_mask_2'],
+        #                 batch['labels'], batch['sent_ids'])
 
-            b_ids1 = b_ids1.to(device)
-            b_mask1 = b_mask1.to(device)
-            b_ids2 = b_ids2.to(device)
-            b_mask2 = b_mask2.to(device)
-            b_labels3 = b_labels3.to(device)
+        #     b_ids1 = b_ids1.to(device)
+        #     b_mask1 = b_mask1.to(device)
+        #     b_ids2 = b_ids2.to(device)
+        #     b_mask2 = b_mask2.to(device)
+        #     b_labels3 = b_labels3.to(device)
 
-            optimizer.zero_grad()
-            logits3 = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2)
+        #     optimizer.zero_grad()
+        #     logits3 = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2)
 
-            mse = F.mse_loss
-            # Normalize [0, 5] to [-1, 1] to align with cosine similarity
-            loss3 = mse(logits3.flatten(), (b_labels3.float()/2.5-1)) / args.batch_size
-            loss3.backward()
-            optimizer.step()
-            num_batches += 1
-            train_loss += loss3.item()
-        ################################################################################
+        #     mse = F.mse_loss
+        #     # Normalize [0, 5] to [-1, 1] to align with cosine similarity
+        #     loss3 = mse(logits3.flatten(), (b_labels3.float()/2.5-1)) / args.batch_size
+        #     loss3.backward()
+        #     optimizer.step()
+        #     num_batches += 1
+        #     train_loss += loss3.item()
+        # ################################################################################
             
         # Change learning rate
         scheduler.step()

@@ -306,3 +306,162 @@ def load_multitask_data(sentiment_filename,paraphrase_filename,similarity_filena
     print(f"Loaded {len(similarity_data)} {split} examples from {similarity_filename}")
 
     return sentiment_data, num_labels, paraphrase_data, similarity_data
+
+def load_multitask_data_additional(sentiment_filename,paraphrase_filename,similarity_filename,split='train'):
+    '''
+    Another function to read in additional dataset specifically. The new datasets have 
+    comma delimiter, so change delimiter only.
+    '''
+    sentiment_data = []
+    num_labels = {}
+    if split == 'test':
+        with open(sentiment_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = ','):
+                sent = record['sentence'].lower().strip()
+                sent_id = record['id'].lower().strip()
+                sentiment_data.append((sent,sent_id))
+    else:
+        with open(sentiment_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = ','):
+                sent = record['sentence'].lower().strip()
+                sent_id = record['id'].lower().strip()
+                label = int(record['sentiment'].strip())
+                if label not in num_labels:
+                    num_labels[label] = len(num_labels)
+                sentiment_data.append((sent, label,sent_id))
+
+    print(f"Loaded {len(sentiment_data)} {split} examples from {sentiment_filename}")
+
+    paraphrase_data = []
+    if split == 'test':
+        with open(paraphrase_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = ','):
+                sent_id = record['id'].lower().strip()
+                paraphrase_data.append((preprocess_string(record['sentence1']),
+                                        preprocess_string(record['sentence2']),
+                                        sent_id))
+
+    else:
+        with open(paraphrase_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = ','):
+                try:
+                    sent_id = record['id'].lower().strip()
+                    paraphrase_data.append((preprocess_string(record['sentence1']),
+                                            preprocess_string(record['sentence2']),
+                                            int(float(record['is_duplicate'])),sent_id))
+                except:
+                    pass
+
+    print(f"Loaded {len(paraphrase_data)} {split} examples from {paraphrase_filename}")
+
+    similarity_data = []
+    if split == 'test':
+        with open(similarity_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = ','):
+                sent_id = record['id'].lower().strip()
+                similarity_data.append((preprocess_string(record['sentence1']),
+                                        preprocess_string(record['sentence2'])
+                                        ,sent_id))
+    else:
+        with open(similarity_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = ','):
+                sent_id = record['id'].lower().strip()
+                similarity_data.append((preprocess_string(record['sentence1']),
+                                        preprocess_string(record['sentence2']),
+                                        float(record['similarity']),sent_id))
+
+    print(f"Loaded {len(similarity_data)} {split} examples from {similarity_filename}")
+
+    return sentiment_data, num_labels, paraphrase_data, similarity_data
+
+def load_multitask_data_merged(sentiment_filename, sentiment_additional, paraphrase_filename, paraphrase_additional,
+                               similarity_filename, similarity_additional, split='train'):
+    '''
+    New loading function to load original dataset and new dataset, and merge those together and
+    return only one dataset per task. Original dataset has delimiter \t and new dataset has comma
+    '''
+    sentiment_data = []
+    num_labels = {}
+    if split == 'test':
+        with open(sentiment_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = ','):
+                sent = record['sentence'].lower().strip()
+                sent_id = record['id'].lower().strip()
+                sentiment_data.append((sent,sent_id))
+    else:
+        with open(sentiment_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = '\t'):
+                sent = record['sentence'].lower().strip()
+                sent_id = record['id'].lower().strip()
+                label = int(record['sentiment'].strip())
+                if label not in num_labels:
+                    num_labels[label] = len(num_labels)
+                sentiment_data.append((sent, label,sent_id))
+        with open(sentiment_additional, 'r') as fp_additional:
+            for record in csv.DictReader(fp_additional,delimiter = ','):
+                sent = record['sentence'].lower().strip()
+                sent_id = record['id'].lower().strip()
+                label = int(record['sentiment'].strip())
+                if label not in num_labels:
+                    num_labels[label] = len(num_labels)
+                sentiment_data.append((sent, label,sent_id))
+
+
+    print(f"Loaded {len(sentiment_data)} {split} examples from {sentiment_filename} and {sentiment_additional}")
+
+    paraphrase_data = []
+    if split == 'test':
+        with open(paraphrase_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = ','):
+                sent_id = record['id'].lower().strip()
+                paraphrase_data.append((preprocess_string(record['sentence1']),
+                                        preprocess_string(record['sentence2']),
+                                        sent_id))
+
+    else:
+        with open(paraphrase_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = '\t'):
+                try:
+                    sent_id = record['id'].lower().strip()
+                    paraphrase_data.append((preprocess_string(record['sentence1']),
+                                            preprocess_string(record['sentence2']),
+                                            int(float(record['is_duplicate'])),sent_id))
+                except:
+                    pass
+        with open(paraphrase_additional, 'r') as fp_additional:
+            for record in csv.DictReader(fp_additional,delimiter = ','):
+                try:
+                    sent_id = record['id'].lower().strip()
+                    paraphrase_data.append((preprocess_string(record['sentence1']),
+                                            preprocess_string(record['sentence2']),
+                                            int(float(record['is_duplicate'])),sent_id))
+                except:
+                    pass
+
+    print(f"Loaded {len(paraphrase_data)} {split} examples from {paraphrase_filename} and {paraphrase_additional}")
+
+    similarity_data = []
+    if split == 'test':
+        with open(similarity_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = ','):
+                sent_id = record['id'].lower().strip()
+                similarity_data.append((preprocess_string(record['sentence1']),
+                                        preprocess_string(record['sentence2'])
+                                        ,sent_id))
+    else:
+        with open(similarity_filename, 'r') as fp:
+            for record in csv.DictReader(fp,delimiter = '\t'):
+                sent_id = record['id'].lower().strip()
+                similarity_data.append((preprocess_string(record['sentence1']),
+                                        preprocess_string(record['sentence2']),
+                                        float(record['similarity']),sent_id))
+        with open(similarity_additional, 'r') as fp_additional:
+            for record in csv.DictReader(fp_additional,delimiter = ','):
+                sent_id = record['id'].lower().strip()
+                similarity_data.append((preprocess_string(record['sentence1']),
+                                        preprocess_string(record['sentence2']),
+                                        float(record['similarity']),sent_id))
+
+    print(f"Loaded {len(similarity_data)} {split} examples from {similarity_filename} and {similarity_additional}")
+
+    return sentiment_data, num_labels, paraphrase_data, similarity_data
