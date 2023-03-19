@@ -34,6 +34,8 @@ three tasks simutaneously. Accuracy are 0.497, 0.787, 0.531. No improvement on s
 sentiment classification. Also, the additional dataset approach also failed. Decreased performance in both
 sentiment classification and similarity tasks compared to the best one. 
 
+6. Grad surg with 1e-5 learning rate but only half data: 0.506, 0.776, 0.654, (0.645)
+
 Update midnight 03/19: Trained grad surg, but with incorrect batch size, and data were cut half. Results are 0.448,
 0.767, 0.651, (0.622), a lot better on similarity but worse on sentiment classification. Also this result used 5e-5
 learning rate, as learning rate scheduler cannot be used for grad batch, this learning rate is too large. Will run another
