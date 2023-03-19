@@ -33,3 +33,8 @@ dev accuracy when training **only** the similarity task using dropout rate = 0.3
 three tasks simutaneously. Accuracy are 0.497, 0.787, 0.531. No improvement on similarity, but worse on
 sentiment classification. Also, the additional dataset approach also failed. Decreased performance in both
 sentiment classification and similarity tasks compared to the best one. 
+
+Update midnight 03/19: Trained grad surg, but with incorrect batch size, and data were cut half. Results are 0.448,
+0.767, 0.651, (0.622), a lot better on similarity but worse on sentiment classification. Also this result used 5e-5
+learning rate, as learning rate scheduler cannot be used for grad batch, this learning rate is too large. Will run another
+experiment with 1e-5 learning rate at night and with good batch size.
