@@ -11,7 +11,7 @@ from optimizer import AdamW
 from tqdm import tqdm
 
 from datasets import SentenceClassificationDataset, SentencePairDataset, \
-    load_multitask_data, load_multitask_test_data
+    load_multitask_data, load_multitask_test_data, load_multitask_data_merged
 
 from evaluation import model_eval_sst, test_model_multitask, model_eval_multitask
 
@@ -165,34 +165,36 @@ def train_multitask(args):
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
     # Load data
     # Create the data and its corresponding datasets and dataloader
-    sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train')
+    sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data_merged(
+        args.sst_train, args.sent_additional, args.para_train, args.para_additional, args.sts_train, args.sim_additional, split ='train')    
     sst_dev_data, num_labels,para_dev_data, sts_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train')
 
-    range1 = [np.arange(8000) for i in range(5)]
+    range1 = [np.random.choice(18500, 10000) for i in range(5)]
     sst_train_data = torch.utils.data.Subset(sst_train_data, indices=np.concatenate(range1))
     sst_train_data = SentenceClassificationDataset(sst_train_data, args)
     sst_dev_data = SentenceClassificationDataset(sst_dev_data, args)
     #### Added ####
-    para_train_data = torch.utils.data.Subset(para_train_data, indices=np.arange(140000))
+    range2 = np.random.choice(145000, 140000)
+    para_train_data = torch.utils.data.Subset(para_train_data, indices=range2)
     para_train_data = SentencePairDataset(para_train_data, args)
     para_dev_data = SentencePairDataset(para_dev_data, args) 
-    range2 = [np.arange(6000) for i in range(5)]
-    sts_train_data = torch.utils.data.Subset(sts_train_data, indices=np.concatenate(range2))
+    range3 = [np.random.choice(10500, 10000) for i in range(5)]
+    sts_train_data = torch.utils.data.Subset(sts_train_data, indices=np.concatenate(range3))
     sts_train_data = SentencePairDataset(sts_train_data, args)
     sts_dev_data = SentencePairDataset(sts_dev_data, args, isRegression=True)
     ###############
 
 
-    sst_train_dataloader = DataLoader(sst_train_data, shuffle=True, batch_size=8,
+    sst_train_dataloader = DataLoader(sst_train_data, shuffle=True, batch_size=5,
                                       collate_fn=sst_train_data.collate_fn)
     sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=False, batch_size=args.batch_size,
                                     collate_fn=sst_dev_data.collate_fn)
     ##### Added #####
-    para_train_dataloader = DataLoader(para_train_data, shuffle=True, batch_size=28,
+    para_train_dataloader = DataLoader(para_train_data, shuffle=True, batch_size=14,
                                       collate_fn=para_train_data.collate_fn) 
     para_dev_dataloader = DataLoader(para_dev_data, shuffle=False, batch_size=args.batch_size,
                                     collate_fn=para_dev_data.collate_fn)
-    sts_train_dataloader = DataLoader(sts_train_data, shuffle=True, batch_size=6,
+    sts_train_dataloader = DataLoader(sts_train_data, shuffle=True, batch_size=5,
                                       collate_fn=sts_train_data.collate_fn) 
     sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=False, batch_size=args.batch_size,
                                     collate_fn=sts_dev_data.collate_fn)
@@ -239,7 +241,7 @@ def train_multitask(args):
         it1 = iter(sst_train_dataloader)
         it2 = iter(para_train_dataloader)
         it3 = iter(sts_train_dataloader)
-        for i in range(5000):
+        for i in range(10000):
             if i % 1000 == 0:
                 print("Training batch No.", i)
             losses = []
@@ -256,7 +258,7 @@ def train_multitask(args):
             b_labels1 = b_labels1.to(device)
 
             logits1 = model.predict_sentiment(b_ids1, b_mask1)
-            loss1 = F.cross_entropy(logits1, b_labels1.view(-1), reduction='sum') / 8
+            loss1 = F.cross_entropy(logits1, b_labels1.view(-1), reduction='sum') / 5
             train_loss += loss1.item()
             losses.append(loss1)
 
@@ -274,7 +276,7 @@ def train_multitask(args):
             b_labels2 = b_labels2.to(device)
 
             logits2 = model.predict_paraphrase(b_ids21, b_mask21, b_ids22, b_mask22)
-            loss2 = F.binary_cross_entropy_with_logits(logits2, b_labels2.float().unsqueeze(1), reduction='sum') / 28
+            loss2 = F.binary_cross_entropy_with_logits(logits2, b_labels2.float().unsqueeze(1), reduction='sum') / 14
             train_loss += loss2.item()
             losses.append(loss2)
 
@@ -294,7 +296,7 @@ def train_multitask(args):
             logits3 = model.predict_similarity(b_ids31, b_mask31, b_ids32, b_mask32)
             mse = F.mse_loss
             # Normalize [0, 5] to [-1, 1] to align with cosine similarity
-            loss3 = mse(logits3.flatten(), (b_labels3.float()/2.5-1)) / 6
+            loss3 = mse(logits3.flatten(), (b_labels3.float()/2.5-1)) / 5
             # TODO: tune this weight number
             train_loss += loss3.item()
             losses.append(loss3)
@@ -385,11 +387,11 @@ def train_multitask(args):
         # scheduler.step()
 
         # # Modify criterion #
-        train_loss = train_loss / 5000
+        train_loss = train_loss / 10000
         print(f"Epoch {epoch}: train loss :: {train_loss :.3f}")
 
-        print("EPOCH {}, training accuracy:".format(epoch))
-        _ = model_eval_multitask(sst_train_dataloader, para_train_dataloader, sts_train_dataloader, model, device)
+        # print("EPOCH {}, training accuracy:".format(epoch))
+        # _ = model_eval_multitask(sst_train_dataloader, para_train_dataloader, sts_train_dataloader, model, device)
         print("EPOCH {}, validation accuracy:".format(epoch))
         paraphrase_accuracy, _, _, sentiment_accuracy, _, _, sts_corr, _, _ = model_eval_multitask(
             sst_dev_dataloader, para_dev_dataloader, sts_dev_dataloader, model, device)
@@ -456,6 +458,12 @@ def get_args():
     parser.add_argument("--sts_train", type=str, default="data/sts-train.csv")
     parser.add_argument("--sts_dev", type=str, default="data/sts-dev.csv")
     parser.add_argument("--sts_test", type=str, default="data/sts-test-student.csv")
+
+    ############# Add in additional dataset #############
+    parser.add_argument("--sent_additional", type=str, default="data/sent_yelp.csv")
+    parser.add_argument("--para_additional", type=str, default="data/para_adv.csv")
+    parser.add_argument("--sim_additional", type=str, default="data/sim_sick.csv")
+    #####################################################
 
     parser.add_argument("--seed", type=int, default=11711)
     parser.add_argument("--epochs", type=int, default=10)
